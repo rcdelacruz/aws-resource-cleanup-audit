@@ -1,0 +1,26 @@
+# AWS Cleanup Reports
+aws_cleanup_report_*/
+
+# AWS Credentials
+.aws/
+credentials
+config
+# Script output
+*.csv
+*.log
+*.txt
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Temporary files
+tmp/
+temp/
