@@ -499,189 +499,196 @@ for region in "${REGIONS[@]}"; do
         
         clean_tags=$(echo "$tags" | tr '\n' ' ' | tr ',' ';' | sed 's/\t/ /g')
         
-        echo "$region,$db_id,$db_class,$engine,$engine_version,$status,$storage,$create_time,$days_old,$multi_az,$encrypted,$avg_connections,$avg_read_iops,$avg_write_iops,\"$clean_tags\",$recommendation,$cost" >> "$RDS_FILE"
-    done <<< "$instances"
+        echo "$region,$db_id,$db_class,$engine,$engine_version,$status,$storage,$create_time,$days_old,$multi_az,$encrypted,$avg_connections,$avg_read_iops,$avg_write_iops,\"$clean_tags\",$recommendation,$cost\" >> \"$RDS_FILE\"
+    done <<< \"$instances\"
 done
 
-echo -e "${GREEN}  ✓ RDS analysis complete${NC}"
-echo ""
+echo -e \"${GREEN}  ✓ RDS analysis complete${NC}\"
+echo \"\"
 
 ################################################################################
-# 7. S3 BUCKETS ANALYSIS
+# 7. S3 BUCKETS ANALYSIS (Global - Run Once)
 ################################################################################
-echo -e "${BLUE}[7/9] Analyzing S3 Buckets...${NC}"
+echo -e \"${BLUE}[7/9] Analyzing S3 Buckets...${NC}\"
+echo -e \"  ${YELLOW}Note: S3 is global, analyzing all buckets once${NC}\"
 
-S3_FILE="$OUTPUT_DIR/07_s3_buckets.csv"
-echo "BucketName,CreationDate,DaysSinceCreation,Region,NumberOfObjects,TotalSize(GB),Versioning,Encryption,PublicAccess,Tags,Recommendation,EstMonthlyCost" > "$S3_FILE"
+S3_FILE=\"$OUTPUT_DIR/07_s3_buckets.csv\"
+echo \"BucketName,CreationDate,DaysSinceCreation,Region,NumberOfObjects,TotalSize(GB),Versioning,Encryption,PublicAccess,Tags,Recommendation,EstMonthlyCost\" > \"$S3_FILE\"
 
-buckets=$(aws s3api list-buckets --query 'Buckets[].[Name,CreationDate]' --output text 2>/dev/null || echo "")
+buckets=$(aws s3api list-buckets --query 'Buckets[].[Name,CreationDate]' --output text 2>/dev/null || echo \"\")
 
-if [ -n "$buckets" ]; then
-    while IFS=$'\t' read -r bucket_name creation_date; do
-        [ -z "$bucket_name" ] && continue
+if [ -n \"$buckets\" ]; then
+    total_buckets=$(echo \"$buckets\" | wc -l)
+    current=0
+    
+    while IFS=$'\\t' read -r bucket_name creation_date; do
+        [ -z \"$bucket_name\" ] && continue
         
-        echo -e "  Analyzing bucket: ${bucket_name}"
+        current=$((current + 1))
+        echo -e \"  Analyzing bucket ${current}/${total_buckets}: ${bucket_name}\"
         
-        days_old=$(days_since "$creation_date")
+        days_old=$(days_since \"$creation_date\")
         
         # Get bucket region
-        bucket_region=$(aws s3api get-bucket-location --bucket "$bucket_name" --query 'LocationConstraint' --output text 2>/dev/null || echo "us-east-1")
-        [ "$bucket_region" = "None" ] && bucket_region="us-east-1"
+        bucket_region=$(aws s3api get-bucket-location --bucket \"$bucket_name\" --query 'LocationConstraint' --output text 2>/dev/null || echo \"us-east-1\")
+        [ \"$bucket_region\" = \"None\" ] && bucket_region=\"us-east-1\"
         
         # Get bucket size and object count
-        size_info=$(aws s3 ls s3://"$bucket_name" --recursive --summarize 2>/dev/null | tail -2)
-        object_count=$(echo "$size_info" | grep "Total Objects:" | awk '{print $3}')
-        total_size=$(echo "$size_info" | grep "Total Size:" | awk '{print $3}')
+        size_info=$(aws s3 ls s3://\"$bucket_name\" --recursive --summarize 2>/dev/null | tail -2)
+        object_count=$(echo \"$size_info\" | grep \"Total Objects:\" | awk '{print $3}')
+        total_size=$(echo \"$size_info\" | grep \"Total Size:\" | awk '{print $3}')
         
-        object_count="${object_count:-0}"
-        total_size="${total_size:-0}"
-        size_gb=$(echo "scale=2; $total_size / 1073741824" | bc)
+        object_count=\"${object_count:-0}\"
+        total_size=\"${total_size:-0}\"
+        size_gb=$(echo \"scale=2; $total_size / 1073741824\" | bc)
         
         # Get versioning status
-        versioning=$(aws s3api get-bucket-versioning --bucket "$bucket_name" --query 'Status' --output text 2>/dev/null || echo "Disabled")
+        versioning=$(aws s3api get-bucket-versioning --bucket \"$bucket_name\" --query 'Status' --output text 2>/dev/null || echo \"Disabled\")
         
         # Get encryption
-        encryption=$(aws s3api get-bucket-encryption --bucket "$bucket_name" --query 'ServerSideEncryptionConfiguration.Rules[0].ApplyServerSideEncryptionByDefault.SSEAlgorithm' --output text 2>/dev/null || echo "None")
+        encryption=$(aws s3api get-bucket-encryption --bucket \"$bucket_name\" --query 'ServerSideEncryptionConfiguration.Rules[0].ApplyServerSideEncryptionByDefault.SSEAlgorithm' --output text 2>/dev/null || echo \"None\")
         
         # Get public access block
-        public_access=$(aws s3api get-public-access-block --bucket "$bucket_name" --query 'PublicAccessBlockConfiguration.BlockPublicAcls' --output text 2>/dev/null || echo "Unknown")
+        public_access=$(aws s3api get-public-access-block --bucket \"$bucket_name\" --query 'PublicAccessBlockConfiguration.BlockPublicAcls' --output text 2>/dev/null || echo \"Unknown\")
         
         # Get tags
-        tags=$(aws s3api get-bucket-tagging --bucket "$bucket_name" --query 'TagSet' --output text 2>/dev/null || echo "")
-        clean_tags=$(echo "$tags" | tr '\n' ' ' | tr ',' ';' | sed 's/\t/ /g')
+        tags=$(aws s3api get-bucket-tagging --bucket \"$bucket_name\" --query 'TagSet' --output text 2>/dev/null || echo \"\")
+        clean_tags=$(echo \"$tags\" | tr '\\n' ' ' | tr ',' ';' | sed 's/\\t/ /g')
         
         # Cost estimate
-        cost="\$$(echo "scale=2; $size_gb * 0.023" | bc)"  # Standard S3 pricing
+        cost=\"\\$$(echo \"scale=2; $size_gb * 0.023\" | bc)\"  # Standard S3 pricing
         
         # Recommendation
-        recommendation=""
-        if [ "$object_count" -eq 0 ]; then
-            recommendation="DELETE - Empty bucket"
-        elif [ "$(echo "$size_gb < 0.1" | bc -l)" = "1" ] && [ "$days_old" -gt 180 ]; then
-            recommendation="REVIEW - Nearly empty and old"
+        recommendation=\"\"
+        if [ \"$object_count\" -eq 0 ]; then
+            recommendation=\"DELETE - Empty bucket\"
+        elif [ \"$(echo \"$size_gb < 0.1\" | bc -l)\" = \"1\" ] && [ \"$days_old\" -gt 180 ]; then
+            recommendation=\"REVIEW - Nearly empty and old\"
         else
-            recommendation="KEEP"
+            recommendation=\"KEEP\"
         fi
         
-        echo "$bucket_name,$creation_date,$days_old,$bucket_region,$object_count,$size_gb,$versioning,$encryption,$public_access,\"$clean_tags\",$recommendation,$cost" >> "$S3_FILE"
-    done <<< "$buckets"
+        echo \"$bucket_name,$creation_date,$days_old,$bucket_region,$object_count,$size_gb,$versioning,$encryption,$public_access,\\\"$clean_tags\\\",$recommendation,$cost\" >> \"$S3_FILE\"
+    done <<< \"$buckets\"
+else
+    echo -e \"  ${YELLOW}No S3 buckets found${NC}\"
 fi
 
-echo -e "${GREEN}  ✓ S3 analysis complete${NC}"
-echo ""
+echo -e \"${GREEN}  ✓ S3 analysis complete (${total_buckets:-0} buckets analyzed)${NC}\"
+echo \"\"
 
 ################################################################################
 # 8. LAMBDA FUNCTIONS ANALYSIS
 ################################################################################
-echo -e "${BLUE}[8/9] Analyzing Lambda Functions...${NC}"
+echo -e \"${BLUE}[8/9] Analyzing Lambda Functions...${NC}\"
 
-LAMBDA_FILE="$OUTPUT_DIR/08_lambda_functions.csv"
-echo "Region,FunctionName,Runtime,MemorySize(MB),CodeSize(bytes),LastModified,DaysSinceModified,Timeout,AvgInvocations,AvgDuration,AvgErrors,Tags,Recommendation,EstMonthlyCost" > "$LAMBDA_FILE"
+LAMBDA_FILE=\"$OUTPUT_DIR/08_lambda_functions.csv\"
+echo \"Region,FunctionName,Runtime,MemorySize(MB),CodeSize(bytes),LastModified,DaysSinceModified,Timeout,AvgInvocations,AvgDuration,AvgErrors,Tags,Recommendation,EstMonthlyCost\" > \"$LAMBDA_FILE\"
 
-for region in "${REGIONS[@]}"; do
-    echo -e "  Scanning region: ${region}"
+for region in \"${REGIONS[@]}\"; do
+    echo -e \"  Scanning region: ${region}\"
     
-    functions=$(aws lambda list-functions \
-        --region "$region" \
-        --query 'Functions[].[FunctionName,Runtime,MemorySize,CodeSize,LastModified,Timeout]' \
-        --output text 2>/dev/null || echo "")
+    functions=$(aws lambda list-functions \\
+        --region \"$region\" \\
+        --query 'Functions[].[FunctionName,Runtime,MemorySize,CodeSize,LastModified,Timeout]' \\
+        --output text 2>/dev/null || echo \"\")
     
-    if [ -z "$functions" ]; then
+    if [ -z \"$functions\" ]; then
         continue
     fi
     
-    while IFS=$'\t' read -r func_name runtime memory code_size last_modified timeout; do
-        [ -z "$func_name" ] && continue
+    while IFS=$'\\t' read -r func_name runtime memory code_size last_modified timeout; do
+        [ -z \"$func_name\" ] && continue
         
-        days_old=$(days_since "$last_modified")
+        days_old=$(days_since \"$last_modified\")
         
         # Get metrics
-        avg_invocations=$(get_metric_stats "AWS/Lambda" "Invocations" "Name=FunctionName,Value=$func_name" "$region" 30)
-        avg_duration=$(get_metric_stats "AWS/Lambda" "Duration" "Name=FunctionName,Value=$func_name" "$region" 30)
-        avg_errors=$(get_metric_stats "AWS/Lambda" "Errors" "Name=FunctionName,Value=$func_name" "$region" 30)
+        avg_invocations=$(get_metric_stats \"AWS/Lambda\" \"Invocations\" \"Name=FunctionName,Value=$func_name\" \"$region\" 30)
+        avg_duration=$(get_metric_stats \"AWS/Lambda\" \"Duration\" \"Name=FunctionName,Value=$func_name\" \"$region\" 30)
+        avg_errors=$(get_metric_stats \"AWS/Lambda\" \"Errors\" \"Name=FunctionName,Value=$func_name\" \"$region\" 30)
         
         # Get tags
-        func_arn=$(aws lambda get-function --function-name "$func_name" --region "$region" --query 'Configuration.FunctionArn' --output text 2>/dev/null)
-        tags=$(aws lambda list-tags --resource "$func_arn" --region "$region" --query 'Tags' --output text 2>/dev/null || echo "")
-        clean_tags=$(echo "$tags" | tr '\n' ' ' | tr ',' ';' | sed 's/\t/ /g')
+        func_arn=$(aws lambda get-function --function-name \"$func_name\" --region \"$region\" --query 'Configuration.FunctionArn' --output text 2>/dev/null)
+        tags=$(aws lambda list-tags --resource \"$func_arn\" --region \"$region\" --query 'Tags' --output text 2>/dev/null || echo \"\")
+        clean_tags=$(echo \"$tags\" | tr '\\n' ' ' | tr ',' ';' | sed 's/\\t/ /g')
         
         # Cost is usually negligible for Lambda
-        cost="<\$1"
+        cost=\"<\\$1\"
         
         # Recommendation
-        recommendation=""
-        if [ "$avg_invocations" != "N/A" ] && [ "$(echo "$avg_invocations < 1" | bc -l)" = "1" ] && [ "$days_old" -gt 90 ]; then
-            recommendation="DELETE - No invocations for 30 days"
+        recommendation=\"\"
+        if [ \"$avg_invocations\" != \"N/A\" ] && [ \"$(echo \"$avg_invocations < 1\" | bc -l)\" = \"1\" ] && [ \"$days_old\" -gt 90 ]; then
+            recommendation=\"DELETE - No invocations for 30 days\"
         else
-            recommendation="KEEP"
+            recommendation=\"KEEP\"
         fi
         
-        echo "$region,$func_name,$runtime,$memory,$code_size,$last_modified,$days_old,$timeout,$avg_invocations,$avg_duration,$avg_errors,\"$clean_tags\",$recommendation,$cost" >> "$LAMBDA_FILE"
-    done <<< "$functions"
+        echo \"$region,$func_name,$runtime,$memory,$code_size,$last_modified,$days_old,$timeout,$avg_invocations,$avg_duration,$avg_errors,\\\"$clean_tags\\\",$recommendation,$cost\" >> \"$LAMBDA_FILE\"
+    done <<< \"$functions\"
 done
 
-echo -e "${GREEN}  ✓ Lambda analysis complete${NC}"
-echo ""
+echo -e \"${GREEN}  ✓ Lambda analysis complete${NC}\"
+echo \"\"
 
 ################################################################################
 # 9. NAT GATEWAYS ANALYSIS
 ################################################################################
-echo -e "${BLUE}[9/9] Analyzing NAT Gateways...${NC}"
+echo -e \"${BLUE}[9/9] Analyzing NAT Gateways...${NC}\"
 
-NAT_FILE="$OUTPUT_DIR/09_nat_gateways.csv"
-echo "Region,NatGatewayId,State,SubnetId,VpcId,CreateTime,DaysSinceCreation,PublicIp,PrivateIp,AvgBytesOut,Tags,Recommendation,EstMonthlyCost" > "$NAT_FILE"
+NAT_FILE=\"$OUTPUT_DIR/09_nat_gateways.csv\"
+echo \"Region,NatGatewayId,State,SubnetId,VpcId,CreateTime,DaysSinceCreation,PublicIp,PrivateIp,AvgBytesOut,Tags,Recommendation,EstMonthlyCost\" > \"$NAT_FILE\"
 
-for region in "${REGIONS[@]}"; do
-    echo -e "  Scanning region: ${region}"
+for region in \"${REGIONS[@]}\"; do
+    echo -e \"  Scanning region: ${region}\"
     
-    nat_gws=$(aws ec2 describe-nat-gateways \
-        --region "$region" \
-        --query 'NatGateways[].[NatGatewayId,State,SubnetId,VpcId,CreateTime,NatGatewayAddresses[0].PublicIp,NatGatewayAddresses[0].PrivateIp,Tags]' \
-        --output text 2>/dev/null || echo "")
+    nat_gws=$(aws ec2 describe-nat-gateways \\
+        --region \"$region\" \\
+        --query 'NatGateways[].[NatGatewayId,State,SubnetId,VpcId,CreateTime,NatGatewayAddresses[0].PublicIp,NatGatewayAddresses[0].PrivateIp,Tags]' \\
+        --output text 2>/dev/null || echo \"\")
     
-    if [ -z "$nat_gws" ]; then
+    if [ -z \"$nat_gws\" ]; then
         continue
     fi
     
-    while IFS=$'\t' read -r nat_id state subnet_id vpc_id create_time public_ip private_ip tags; do
-        [ -z "$nat_id" ] && continue
+    while IFS=$'\\t' read -r nat_id state subnet_id vpc_id create_time public_ip private_ip tags; do
+        [ -z \"$nat_id\" ] && continue
         
-        days_old=$(days_since "$create_time")
+        days_old=$(days_since \"$create_time\")
         
         # Get metrics
-        avg_bytes_out="N/A"
-        if [ "$state" = "available" ]; then
-            avg_bytes_out=$(get_metric_stats "AWS/NATGateway" "BytesOutToDestination" "Name=NatGatewayId,Value=$nat_id" "$region" 30)
+        avg_bytes_out=\"N/A\"
+        if [ \"$state\" = \"available\" ]; then
+            avg_bytes_out=$(get_metric_stats \"AWS/NATGateway\" \"BytesOutToDestination\" \"Name=NatGatewayId,Value=$nat_id\" \"$region\" 30)
         fi
         
-        clean_tags=$(echo "$tags" | tr '\n' ' ' | tr ',' ';' | sed 's/\t/ /g')
+        clean_tags=$(echo \"$tags\" | tr '\\n' ' ' | tr ',' ';' | sed 's/\\t/ /g')
         
         # NAT Gateways are expensive!
-        cost="\$32.40"  # ~$0.045/hour
+        cost=\"\\$32.40\"  # ~$0.045/hour
         
         # Recommendation
-        recommendation=""
-        if [ "$avg_bytes_out" != "N/A" ] && [ "$(echo "$avg_bytes_out < 1000000" | bc -l)" = "1" ]; then
-            recommendation="REVIEW - Very low traffic (consider deleting)"
+        recommendation=\"\"
+        if [ \"$avg_bytes_out\" != \"N/A\" ] && [ \"$(echo \"$avg_bytes_out < 1000000\" | bc -l)\" = \"1\" ]; then
+            recommendation=\"REVIEW - Very low traffic (consider deleting)\"
         else
-            recommendation="KEEP"
+            recommendation=\"KEEP\"
         fi
         
-        echo "$region,$nat_id,$state,$subnet_id,$vpc_id,$create_time,$days_old,$public_ip,$private_ip,$avg_bytes_out,\"$clean_tags\",$recommendation,$cost" >> "$NAT_FILE"
-    done <<< "$nat_gws"
+        echo \"$region,$nat_id,$state,$subnet_id,$vpc_id,$create_time,$days_old,$public_ip,$private_ip,$avg_bytes_out,\\\"$clean_tags\\\",$recommendation,$cost\" >> \"$NAT_FILE\"
+    done <<< \"$nat_gws\"
 done
 
-echo -e "${GREEN}  ✓ NAT Gateway analysis complete${NC}"
-echo ""
+echo -e \"${GREEN}  ✓ NAT Gateway analysis complete${NC}\"
+echo \"\"
 
 ################################################################################
 # GENERATE SUMMARY REPORT
 ################################################################################
-echo -e "${BLUE}Generating Summary Report...${NC}"
+echo -e \"${BLUE}Generating Summary Report...${NC}\"
 
-SUMMARY_FILE="$OUTPUT_DIR/00_SUMMARY_REPORT.txt"
+SUMMARY_FILE=\"$OUTPUT_DIR/00_SUMMARY_REPORT.txt\"
 
-cat > "$SUMMARY_FILE" << EOF
+cat > \"$SUMMARY_FILE\" << EOF
 ================================================================================
 AWS RESOURCE CLEANUP AUDIT REPORT
 ================================================================================
@@ -714,23 +721,23 @@ KEY FINDINGS
 EOF
 
 # Count recommendations by type
-for file in "$OUTPUT_DIR"/*.csv; do
-    [ "$file" = "$OUTPUT_DIR/*.csv" ] && continue
-    [ "$(basename "$file")" = "00_SUMMARY_REPORT.txt" ] && continue
+for file in \"$OUTPUT_DIR\"/*.csv; do
+    [ \"$file\" = \"$OUTPUT_DIR/*.csv\" ] && continue
+    [ \"$(basename \"$file\")\" = \"00_SUMMARY_REPORT.txt\" ] && continue
     
-    filename=$(basename "$file")
-    total_resources=$(tail -n +2 "$file" | wc -l)
-    delete_count=$(tail -n +2 "$file" | grep -c "DELETE" || echo "0")
-    review_count=$(tail -n +2 "$file" | grep -c "REVIEW" || echo "0")
+    filename=$(basename \"$file\")
+    total_resources=$(tail -n +2 \"$file\" | wc -l)
+    delete_count=$(tail -n +2 \"$file\" | grep -c \"DELETE\" || echo \"0\")
+    review_count=$(tail -n +2 \"$file\" | grep -c \"REVIEW\" || echo \"0\")
     
-    echo "File: $filename" >> "$SUMMARY_FILE"
-    echo "  Total Resources: $total_resources" >> "$SUMMARY_FILE"
-    echo "  Recommended for DELETE: $delete_count" >> "$SUMMARY_FILE"
-    echo "  Recommended for REVIEW: $review_count" >> "$SUMMARY_FILE"
-    echo "" >> "$SUMMARY_FILE"
+    echo \"File: $filename\" >> \"$SUMMARY_FILE\"
+    echo \"  Total Resources: $total_resources\" >> \"$SUMMARY_FILE\"
+    echo \"  Recommended for DELETE: $delete_count\" >> \"$SUMMARY_FILE\"
+    echo \"  Recommended for REVIEW: $review_count\" >> \"$SUMMARY_FILE\"
+    echo \"\" >> \"$SUMMARY_FILE\"
 done
 
-cat >> "$SUMMARY_FILE" << EOF
+cat >> \"$SUMMARY_FILE\" << EOF
 
 ================================================================================
 QUICK WINS (HIGH PRIORITY)
@@ -738,13 +745,13 @@ QUICK WINS (HIGH PRIORITY)
 
 1. UNATTACHED ELASTIC IPs
    - Check: 04_elastic_ips.csv
-   - Look for: Recommendation = "DELETE - Unassociated"
+   - Look for: Recommendation = \"DELETE - Unassociated\"
    - Action: Release these immediately
-   - Savings: \$3.60/month per IP
+   - Savings: \\$3.60/month per IP
 
 2. UNATTACHED EBS VOLUMES
    - Check: 02_ebs_volumes.csv
-   - Look for: State = "available" AND DaysSinceCreation > 30
+   - Look for: State = \"available\" AND DaysSinceCreation > 30
    - Action: Create snapshots, then delete
    - Savings: Varies by volume type/size
 
@@ -752,11 +759,11 @@ QUICK WINS (HIGH PRIORITY)
    - Check: 03_ebs_snapshots.csv
    - Look for: DaysSinceCreation > 365
    - Action: Delete after confirming not needed
-   - Savings: \$0.05/GB-month
+   - Savings: \\$0.05/GB-month
 
 4. STOPPED EC2 INSTANCES
    - Check: 01_ec2_instances.csv
-   - Look for: State = "stopped" AND DaysSinceLaunch > 30
+   - Look for: State = \"stopped\" AND DaysSinceLaunch > 30
    - Action: Terminate (EBS charges still apply while stopped!)
    - Savings: Varies by instance type
 
@@ -770,16 +777,16 @@ QUICK WINS (HIGH PRIORITY)
    - Check: 05_load_balancers.csv
    - Look for: AvgRequestCount < 1 or AvgActiveConnections < 1
    - Action: Delete
-   - Savings: \$16-22/month per LB
+   - Savings: \\$16-22/month per LB
 
 ================================================================================
 NEXT STEPS
 ================================================================================
 
 1. Review each CSV file in a spreadsheet application
-2. Sort by "Recommendation" column to prioritize actions
-3. Start with "DELETE" recommendations (safest wins)
-4. Review "REVIEW" recommendations more carefully
+2. Sort by \"Recommendation\" column to prioritize actions
+3. Start with \"DELETE\" recommendations (safest wins)
+4. Review \"REVIEW\" recommendations more carefully
 5. For critical resources, verify in CloudWatch before deleting
 6. Take snapshots/backups before deletion
 7. Delete in stages (week by week) to catch any issues
@@ -791,7 +798,7 @@ IMPORTANT NOTES
 
 - All cost estimates are approximate
 - CloudWatch metrics are 30-day averages
-- Some metrics may show "N/A" if CloudWatch data is unavailable
+- Some metrics may show \"N/A\" if CloudWatch data is unavailable
 - Always verify critical resources before deletion
 - Keep snapshots for 30 days after resource deletion
 - Consider setting up AWS Config for ongoing monitoring
@@ -816,28 +823,28 @@ END OF REPORT
 ================================================================================
 EOF
 
-echo -e "${GREEN}  ✓ Summary report generated${NC}"
-echo ""
+echo -e \"${GREEN}  ✓ Summary report generated${NC}\"
+echo \"\"
 
 ################################################################################
 # FINAL OUTPUT
 ################################################################################
 
-echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}AUDIT COMPLETE!${NC}"
-echo -e "${GREEN}========================================${NC}"
-echo ""
-echo -e "Report location: ${BLUE}${OUTPUT_DIR}${NC}"
-echo ""
-echo -e "Generated files:"
-ls -lh "$OUTPUT_DIR"
-echo ""
-echo -e "${YELLOW}Next steps:${NC}"
-echo -e "1. Review ${BLUE}00_SUMMARY_REPORT.txt${NC} for overview"
-echo -e "2. Open CSV files in spreadsheet application"
-echo -e "3. Sort by 'Recommendation' column"
-echo -e "4. Start with 'DELETE' recommendations"
-echo -e "5. Verify critical resources before deletion"
-echo ""
-echo -e "${RED}WARNING: Always backup/snapshot before deleting resources!${NC}"
-echo ""
+echo -e \"${GREEN}========================================${NC}\"
+echo -e \"${GREEN}AUDIT COMPLETE!${NC}\"
+echo -e \"${GREEN}========================================${NC}\"
+echo \"\"
+echo -e \"Report location: ${BLUE}${OUTPUT_DIR}${NC}\"
+echo \"\"
+echo -e \"Generated files:\"
+ls -lh \"$OUTPUT_DIR\"
+echo \"\"
+echo -e \"${YELLOW}Next steps:${NC}\"
+echo -e \"1. Review ${BLUE}00_SUMMARY_REPORT.txt${NC} for overview\"
+echo -e \"2. Open CSV files in spreadsheet application\"
+echo -e \"3. Sort by 'Recommendation' column\"
+echo -e \"4. Start with 'DELETE' recommendations\"
+echo -e \"5. Verify critical resources before deletion\"
+echo \"\"
+echo -e \"${RED}WARNING: Always backup/snapshot before deleting resources!${NC}\"
+echo \"\"
